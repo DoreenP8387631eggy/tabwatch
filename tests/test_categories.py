@@ -22,6 +22,15 @@ def client(tmp_store):
 
 
 def _create_session_with_events(client, tmp_store):
+    """Create a closed session with three tab events across different categories.
+
+    Events:
+      - GitHub (development) at t+0 min
+      - Twitter (social)     at t+20 min
+      - Python Docs (docs)   at t+35 min
+
+    Returns the session ID string.
+    """
     r = client.post("/sessions")
     sid = r.get_json()["session_id"]
     base = datetime(2024, 6, 1, 10, 0, 0)
@@ -72,6 +81,16 @@ def test_categories_returns_breakdown(client, tmp_store):
     cats = data["categories"]
     assert isinstance(cats, dict)
     assert len(cats) >= 1
+
+
+def test_categories_total_seconds_matches_sum(client, tmp_store):
+    """Verify that total_seconds equals the sum of all per-category seconds."""
+    sid = _create_session_with_events(client, tmp_store)
+    r = client.get(f"/sessions/{sid}/categories")
+    assert r.status_code == 200
+    data = r.get_json()
+    category_sum = sum(data["categories"].values())
+    assert abs(data["total_seconds"] - category_sum) < 1e-6
 
 
 def test_top_categories_structure(client, tmp_store):
