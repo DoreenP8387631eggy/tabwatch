@@ -1,70 +1,62 @@
-"""Streak analysis: compute daily usage streaks from session metadata."""
-
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
-
+from datetime import date, timedelta
+from typing import List
 from backend.models.session import BrowsingSession
 
 
-def _session_date(session: BrowsingSession) -> str:
-    """Return ISO date string (YYYY-MM-DD) for the session start time."""
-    dt = datetime.fromtimestamp(session.start_time, tz=timezone.utc)
-    return dt.date().isoformat()
+def _session_date(session: BrowsingSession) -> date:
+    """Extract the calendar date from a session's start time."""
+    return session.start_time.date()
 
 
-def compute_streak(sessions: List[BrowsingSession]) -> Dict[str, Any]:
+def compute_streak(sessions: List[BrowsingSession]) -> dict:
     """
-    Given a list of BrowsingSession objects, compute:
-      - current_streak: consecutive days ending on the most recent session date
-      - longest_streak: longest run of consecutive days ever seen
-      - active_days: sorted list of unique dates with at least one session
-      - total_sessions: total number of sessions provided
+    Compute the current and longest streak of consecutive days
+    with at least one closed browsing session.
+
+    Returns a dict with:
+      - current_streak: int
+      - longest_streak: int
+      - streak_start: str (ISO date) or None
+      - today_covered: bool
     """
-    if not sessions:
+    closed = [s for s in sessions if s.end_time is not None]
+    if not closed:
         return {
             "current_streak": 0,
             "longest_streak": 0,
-            "active_days": [],
-            "total_sessions": 0,
+            "streak_start": None,
+            "today_covered": False,
         }
 
-    # Collect unique active dates
-    active_dates = sorted(
-        set(_session_date(s) for s in sessions)
-    )
+    unique_dates = sorted({_session_date(s) for s in closed})
+    today = date.today()
 
-    # Convert to date objects for arithmetic
-    from datetime import date
-    date_objs = [date.fromisoformat(d) for d in active_dates]
-
-    # Compute longest streak
-    longest = 1
-    current_run = 1
-    for i in range(1, len(date_objs)):
-        if (date_objs[i] - date_objs[i - 1]).days == 1:
-            current_run += 1
-            longest = max(longest, current_run)
+    # Build runs of consecutive dates
+    runs: List[List[date]] = []
+    current_run: List[date] = [unique_dates[0]]
+    for d in unique_dates[1:]:
+        if d - current_run[-1] == timedelta(days=1):
+            current_run.append(d)
         else:
-            current_run = 1
+            runs.append(current_run)
+            current_run = [d]
+    runs.append(current_run)
 
-    # Compute current streak (streak ending on the last active day)
-    today = datetime.now(tz=timezone.utc).date()
-    last_day = date_objs[-1]
+    longest_streak = max(len(r) for r in runs)
 
-    # Streak is only "current" if last active day is today or yesterday
-    if (today - last_day).days > 1:
-        current_streak = 0
+    # Current streak: the run that ends today or yesterday
+    last_run = runs[-1]
+    last_date = last_run[-1]
+    if last_date >= today - timedelta(days=1):
+        current_streak = len(last_run)
+        streak_start = last_run[0].isoformat()
     else:
-        current_streak = 1
-        for i in range(len(date_objs) - 1, 0, -1):
-            if (date_objs[i] - date_objs[i - 1]).days == 1:
-                current_streak += 1
-            else:
-                break
+        current_streak = 0
+        streak_start = None
 
     return {
         "current_streak": current_streak,
-        "longest_streak": longest,
-        "active_days": active_dates,
-        "total_sessions": len(sessions),
+        "longest_streak": longest_streak,
+        "streak_start": streak_start,
+        "today_covered": last_date == today,
     }
