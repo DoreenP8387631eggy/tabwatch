@@ -1,14 +1,5 @@
-"""Compute browsing velocity metrics for a session.
-
-Velocity measures how rapidly a user switches between tabs/domains
-over time, expressed as events-per-minute and domain-switches-per-minute.
-"""
-
-from __future__ import annotations
-
 from datetime import datetime
-from typing import Any
-
+from typing import Dict, Any
 from backend.models.session import BrowsingSession
 
 
@@ -16,54 +7,61 @@ def _parse_ts(ts: str) -> datetime:
     return datetime.fromisoformat(ts)
 
 
-def compute_velocity(session: BrowsingSession) -> dict[str, Any]:
-    """Return velocity metrics for a closed or open session."""
+def _domain(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).netloc.lstrip("www.") or url
+    except Exception:
+        return url
+
+
+def compute_velocity(session: BrowsingSession) -> Dict[str, Any]:
+    """Compute tab-switching velocity metrics for a session."""
     events = session.events
     if not events:
         return {
-            "event_count": 0,
-            "duration_minutes": 0.0,
-            "events_per_minute": 0.0,
-            "domain_switches": 0,
-            "domain_switches_per_minute": 0.0,
-            "peak_burst": 0,
+            "total_switches": 0,
+            "switches_per_minute": 0.0,
+            "unique_domains_visited": 0,
+            "avg_time_per_domain_seconds": 0.0,
+            "domain_switch_sequence": [],
         }
 
-    start = _parse_ts(events[0].timestamp)
-    end_ts = session.closed_at or events[-1].timestamp
-    end = _parse_ts(end_ts)
+    sorted_events = sorted(events, key=lambda e: e.timestamp)
+    first_ts = _parse_ts(sorted_events[0].timestamp)
+    last_ts = _parse_ts(sorted_events[-1].timestamp)
+    duration_minutes = (last_ts - first_ts).total_seconds() / 60.0
 
-    duration_seconds = max((end - start).total_seconds(), 1)
-    duration_minutes = duration_seconds / 60.0
-
-    # Count domain switches (consecutive domain changes)
-    def _domain(url: str) -> str:
-        try:
-            from urllib.parse import urlparse
-            host = urlparse(url).hostname or url
-            return host.removeprefix("www.")
-        except Exception:
-            return url
-
-    domains = [_domain(e.url) for e in events]
+    domains = [_domain(e.url) for e in sorted_events]
     switches = sum(1 for i in range(1, len(domains)) if domains[i] != domains[i - 1])
+    unique_domains = len(set(domains))
 
-    events_per_minute = len(events) / duration_minutes
-    switches_per_minute = switches / duration_minutes
+    switches_per_minute = round(switches / duration_minutes, 2) if duration_minutes > 0 else 0.0
 
-    # Peak burst: max events in any 60-second sliding window
-    timestamps = [_parse_ts(e.timestamp) for e in events]
-    peak_burst = 0
-    for i, t in enumerate(timestamps):
-        burst = sum(1 for t2 in timestamps[i:] if (t2 - t).total_seconds() <= 60)
-        if burst > peak_burst:
-            peak_burst = burst
+    domain_durations: Dict[str, float] = {}
+    for i, event in enumerate(sorted_events):
+        d = _domain(event.url)
+        if i + 1 < len(sorted_events):
+            next_ts = _parse_ts(sorted_events[i + 1].timestamp)
+            cur_ts = _parse_ts(event.timestamp)
+            secs = (next_ts - cur_ts).total_seconds()
+            domain_durations[d] = domain_durations.get(d, 0.0) + secs
+
+    avg_time = (
+        round(sum(domain_durations.values()) / unique_domains, 2)
+        if unique_domains > 0
+        else 0.0
+    )
+
+    sequence = [domains[0]]
+    for d in domains[1:]:
+        if d != sequence[-1]:
+            sequence.append(d)
 
     return {
-        "event_count": len(events),
-        "duration_minutes": round(duration_minutes, 2),
-        "events_per_minute": round(events_per_minute, 2),
-        "domain_switches": switches,
-        "domain_switches_per_minute": round(switches_per_minute, 2),
-        "peak_burst": peak_burst,
+        "total_switches": switches,
+        "switches_per_minute": switches_per_minute,
+        "unique_domains_visited": unique_domains,
+        "avg_time_per_domain_seconds": avg_time,
+        "domain_switch_sequence": sequence,
     }
