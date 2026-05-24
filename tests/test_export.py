@@ -90,3 +90,15 @@ def test_export_markdown(client):
     assert "## Summary" in text
     assert "## Tags" in text
     assert "## Top Domains" in text
+
+
+def test_export_json_event_fields(client):
+    """Verify that each event in the JSON export contains the expected fields."""
+    sid = _create_session_with_events(client)
+    resp = client.get(f"/sessions/{sid}/export/json")
+    data = json.loads(resp.data)
+    expected_fields = {"url", "title", "duration_seconds", "event_type"}
+    for event in data["events"]:
+        assert expected_fields.issubset(
+            event.keys()
+        ), f"Event missing fields: {expected_fields - event.keys()}"
