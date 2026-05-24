@@ -83,6 +83,16 @@ def test_replay_subsequent_frame_has_gap(client):
     assert second["duration_since_prev"] > 0
 
 
+def test_replay_frame_gap_value(client):
+    """Verify that duration_since_prev reflects the actual time delta between events."""
+    sid = _create_session_with_events(client, n=3)
+    r = client.get(f"/sessions/{sid}/replay")
+    frames = r.get_json()["frames"]
+    # Events are spaced 5 minutes (300 seconds) apart
+    for frame in frames[1:]:
+        assert frame["duration_since_prev"] == pytest.approx(300, abs=1)
+
+
 def test_get_single_frame(client):
     sid = _create_session_with_events(client, n=3)
     r = client.get(f"/sessions/{sid}/replay/1")
