@@ -10,23 +10,37 @@ def _store():
     return current_app.config["SESSION_STORE"]
 
 
+def _load_closed_sessions(store, session_a_id: str, session_b_id: str):
+    """Load two sessions and validate they exist and are closed.
+
+    Returns a tuple of (session_a, session_b, error_response) where
+    error_response is None on success or a (jsonify response, status_code)
+    tuple if validation fails.
+    """
+    session_a = store.load(session_a_id)
+    if session_a is None:
+        return None, None, (jsonify({"error": f"Session {session_a_id} not found"}), 404)
+
+    session_b = store.load(session_b_id)
+    if session_b is None:
+        return None, None, (jsonify({"error": f"Session {session_b_id} not found"}), 404)
+
+    if not session_a.end_time:
+        return None, None, (jsonify({"error": f"Session {session_a_id} is still open"}), 400)
+
+    if not session_b.end_time:
+        return None, None, (jsonify({"error": f"Session {session_b_id} is still open"}), 400)
+
+    return session_a, session_b, None
+
+
 @bp.route("/sessions/<session_a_id>/compare/<session_b_id>", methods=["GET"])
 def compare(session_a_id: str, session_b_id: str):
     """Compare two sessions by their IDs."""
     store = _store()
-    session_a = store.load(session_a_id)
-    if session_a is None:
-        return jsonify({"error": f"Session {session_a_id} not found"}), 404
-
-    session_b = store.load(session_b_id)
-    if session_b is None:
-        return jsonify({"error": f"Session {session_b_id} not found"}), 404
-
-    if not session_a.end_time:
-        return jsonify({"error": f"Session {session_a_id} is still open"}), 400
-
-    if not session_b.end_time:
-        return jsonify({"error": f"Session {session_b_id} is still open"}), 400
+    session_a, session_b, err = _load_closed_sessions(store, session_a_id, session_b_id)
+    if err:
+        return err
 
     result = compare_sessions(session_a, session_b)
     return jsonify(result), 200
@@ -36,16 +50,9 @@ def compare(session_a_id: str, session_b_id: str):
 def compare_delta(session_a_id: str, session_b_id: str):
     """Return only the delta fields between two sessions."""
     store = _store()
-    session_a = store.load(session_a_id)
-    if session_a is None:
-        return jsonify({"error": f"Session {session_a_id} not found"}), 404
-
-    session_b = store.load(session_b_id)
-    if session_b is None:
-        return jsonify({"error": f"Session {session_b_id} not found"}), 404
-
-    if not session_a.end_time or not session_b.end_time:
-        return jsonify({"error": "Both sessions must be closed"}), 400
+    session_a, session_b, err = _load_closed_sessions(store, session_a_id, session_b_id)
+    if err:
+        return err
 
     result = compare_sessions(session_a, session_b)
     delta = {
