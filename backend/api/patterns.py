@@ -10,16 +10,22 @@ def _store():
     return current_app.config["SESSION_STORE"]
 
 
-@patterns_bp.route("/patterns", methods=["GET"])
-def get_patterns():
-    """Return recurring browsing patterns across all closed sessions."""
-    store = _store()
+def _load_closed_sessions(store):
+    """Load all sessions that have been closed (have an end_time)."""
     all_ids = store.list_sessions()
     sessions = []
     for sid in all_ids:
         session = store.load(sid)
         if session and session.end_time is not None:
             sessions.append(session)
+    return sessions
+
+
+@patterns_bp.route("/patterns", methods=["GET"])
+def get_patterns():
+    """Return recurring browsing patterns across all closed sessions."""
+    store = _store()
+    sessions = _load_closed_sessions(store)
 
     if not sessions:
         return jsonify({
@@ -40,12 +46,7 @@ def get_patterns():
 def get_recurring_domains():
     """Return only the list of recurring domains."""
     store = _store()
-    all_ids = store.list_sessions()
-    sessions = [
-        store.load(sid)
-        for sid in all_ids
-        if store.load(sid) and store.load(sid).end_time is not None
-    ]
+    sessions = _load_closed_sessions(store)
     result = detect_patterns(sessions)
     return jsonify({"recurring_domains": result["recurring_domains"]}), 200
 
@@ -54,11 +55,6 @@ def get_recurring_domains():
 def get_peak_hours():
     """Return the top peak hours of browsing activity."""
     store = _store()
-    all_ids = store.list_sessions()
-    sessions = [
-        store.load(sid)
-        for sid in all_ids
-        if store.load(sid) and store.load(sid).end_time is not None
-    ]
+    sessions = _load_closed_sessions(store)
     result = detect_patterns(sessions)
     return jsonify({"peak_hours": result["peak_hours"]}), 200
